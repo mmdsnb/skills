@@ -1,0 +1,5 @@
+# Temporary handoff exports
+.handoff/
+
+# Local settings
+.qoder/
