@@ -23,7 +23,7 @@ live_spec.loader.exec_module(live)
 
 
 class OutlineTests(unittest.TestCase):
-    def invoke(self, argv, response=None, env=None):
+    def invoke(self, argv, response=None, env=None, stdin=""):
         requests = []
         def handler(request):
             requests.append(request)
@@ -35,10 +35,15 @@ class OutlineTests(unittest.TestCase):
         stdout, stderr = io.StringIO(), io.StringIO()
         with patch.dict(os.environ, ENV if env is None else env, clear=True), \
              patch.object(cli.httpx, "Client", side_effect=client), \
+             patch.object(cli.sys, "stdin", io.StringIO(stdin) if isinstance(stdin, str) else stdin), \
              contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            code = cli.main(argv)
-        output = json.loads(stderr.getvalue() if code else stdout.getvalue())
-        self.assertEqual(stdout.getvalue() == "", bool(code))
+            try:
+                code = cli.main(argv)
+            except SystemExit as error:
+                code = error.code
+        self.assertEqual(stderr.getvalue(), "")
+        output = json.loads(stdout.getvalue())
+        self.assertIs(output["ok"], not bool(code))
         return code, output, requests
 
     def test_read_and_search_routes(self):
@@ -47,7 +52,7 @@ class OutlineTests(unittest.TestCase):
             (["tree", "collection-id"], "collections.documents", {"id": "collection-id"}),
             (["read", "document-id"], "documents.info", {"id": "document-id"}),
             (["search", "项目", "--collection", "collection-id", "--offset", "10"], "documents.search",
-             {"query": "项目", "filters": [{"field": "collectionId", "operator": "eq", "value": "collection-id"}], "limit": 10, "offset": 10}),
+             {"query": "项目", "collectionId": "collection-id", "limit": 10, "offset": 10}),
             (["search", "项目"], "documents.search", {"query": "项目", "limit": 10, "offset": 0}),
         ]
         for argv, endpoint, body in cases:
@@ -97,6 +102,46 @@ class OutlineTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(requests[0].url.path, "/api/documents.create")
             self.assertEqual(json.loads(requests[0].content), {"title": "环境", field: "location-id", "text": "长期事实", "publish": True})
+
+    def test_create_without_body_uses_category_placeholder(self):
+        for flag, field in (("--collection", "collectionId"), ("--parent", "parentDocumentId")):
+            with self.subTest(flag=flag):
+                code, _, requests = self.invoke(["create", "20 环境与资产", flag, "location-id"])
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(requests[0].content), {
+                    "title": "20 环境与资产", field: "location-id", "text": "*(分类目录节点)*", "publish": True,
+                })
+
+    def test_stdin_preserves_markdown_and_metacharacters(self):
+        text = '\r\n\r\n### 修订\n\n```sh\nprintf "%s" "$HOME"\n`command`\npath="C:\\data"\n```\n'
+        for argv, expected in ((["create", "对象", "--parent", "parent-id"], text),
+                               (["append", "doc"], "\n\n" + text.lstrip("\r\n"))):
+            with self.subTest(command=argv[0]):
+                code, _, requests = self.invoke([*argv, "--file", "-"], stdin=text)
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(requests[0].content)["text"], expected)
+
+    def test_empty_content_is_not_treated_as_omitted_category_body(self):
+        for argv in (["create", "目录", "--collection", "collection-id"], ["append", "doc"]):
+            for flag, value in (("--text", ""), ("--text", " \n"), ("--file", "-")):
+                with self.subTest(command=argv[0], flag=flag, value=value):
+                    code, output, requests = self.invoke([*argv, flag, value], stdin=" \n")
+                    self.assertEqual(code, 1)
+                    self.assertIn("不能为空", output["error"])
+                    self.assertEqual(requests, [])
+
+    def test_stdin_failures_and_secret_refusal_emit_json_without_request(self):
+        for error in (OSError("test-secret-key"), UnicodeError("test-secret-key")):
+            stream = io.StringIO()
+            with self.subTest(error=error), patch.object(stream, "read", side_effect=error):
+                code, output, requests = self.invoke(["append", "doc", "--file", "-"], stdin=stream)
+                self.assertEqual(code, 1)
+                self.assertNotIn(ENV["OUTLINE_API_KEY"], json.dumps(output))
+                self.assertEqual(requests, [])
+        code, output, requests = self.invoke(["append", "doc", "--file", "-"], stdin=ENV["OUTLINE_API_KEY"])
+        self.assertEqual(code, 1)
+        self.assertNotIn(ENV["OUTLINE_API_KEY"], json.dumps(output))
+        self.assertEqual(requests, [])
 
     def test_append_is_only_new_text(self):
         code, _, requests = self.invoke(["append", "document-id", "--text", "新修订"])
@@ -213,7 +258,8 @@ class OutlineTests(unittest.TestCase):
     def test_errors_do_not_retry_or_expose_secrets(self):
         responses = [httpx.Response(status, text="test-secret-key") for status in (401, 403, 409, 500)]
         responses.extend([httpx.ReadTimeout("test-secret-key"), httpx.ConnectError("test-secret-key"),
-                          httpx.Response(200, text="not json"), httpx.Response(200, json={"ok": False, "error": "test-secret-key"})])
+                          httpx.Response(200, text="not json"), httpx.Response(200, content=b"\xff"),
+                          httpx.Response(200, json={"ok": False, "error": "test-secret-key"})])
         for response in responses:
             with self.subTest(response=response):
                 code, output, requests = self.invoke(["append", "doc", "--text", "新修订"], response=response)
@@ -235,20 +281,41 @@ class OutlineTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(output["data"]["text"], "[REDACTED] 中文")
         self.assertEqual(output["pagination"], {"offset": 10, "limit": 10})
+        self.assertIs(output["ok"], True)
+
+    def test_help_is_stdout_json_for_root_and_subcommands(self):
+        for command in (None, *cli.ENDPOINTS):
+            with self.subTest(command=command):
+                argv = [command, "--help"] if command else ["--help"]
+                code, output, requests = self.invoke(argv, env={})
+                self.assertEqual(code, 0)
+                self.assertIn("usage:", output["help"])
+                self.assertEqual(requests, [])
+
+    def test_argument_errors_redact_configured_key(self):
+        code, output, requests = self.invoke(["read", "doc", ENV["OUTLINE_API_KEY"]])
+        self.assertEqual(code, 2)
+        self.assertNotIn(ENV["OUTLINE_API_KEY"], json.dumps(output))
+        self.assertIn("[REDACTED]", output["error"])
+        self.assertEqual(requests, [])
 
     def test_no_ambiguous_write_or_dangerous_command(self):
         cases = [
+            [], ["read"], ["search"], ["append", "doc"],
             ["create", "标题", "--text", "内容"],
             ["create", "标题", "--collection", "a", "--parent", "b", "--text", "内容"],
+            ["create", "标题", "--collection", "a", "--text", "a", "--file", "b"],
             ["append", "doc", "--text", "a", "--file", "b"],
             ["collections", "--limit", "101"], ["search", "对象", "--offset", "-1"],
+            ["collections", "--limit", "not-int"], ["search", "对象", "--offset", "bad"],
             ["delete", "doc"], ["tools"],
         ]
         for argv in cases:
-            with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()):
-                with self.assertRaises(SystemExit) as error:
-                    cli.parser().parse_args(argv)
-                self.assertEqual(error.exception.code, 2)
+            with self.subTest(argv=argv):
+                code, output, requests = self.invoke(argv)
+                self.assertEqual(code, 2)
+                self.assertTrue(output["error"].startswith("参数错误: "))
+                self.assertEqual(requests, [])
 
 
 class LiveCleanupTests(unittest.TestCase):

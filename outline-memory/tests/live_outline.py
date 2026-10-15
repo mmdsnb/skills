@@ -47,9 +47,10 @@ class LiveTests:
         self.passed += 1
         print(f"PASS {name}", flush=True)
 
-    def invoke(self, *args, code=0, env=None):
+    def invoke(self, *args, code=0, env=None, stdin=None):
         result = subprocess.run(
             [sys.executable, str(SCRIPT), *args],
+            input=stdin,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -57,19 +58,19 @@ class LiveTests:
             env=env,
         )
         require(self.key not in result.stdout + result.stderr, "CLI output exposed API key")
-        payload = json.loads(result.stderr if result.returncode else result.stdout)
+        payload = json.loads(result.stdout)
         if args[0] == "create-collection" and not result.returncode:
             self.collections[payload["data"]["id"]] = args[1]
         if args[0] == "create" and not result.returncode:
             self.documents[payload["data"]["id"]] = args[1]
         require(result.returncode == code, f"{args[0]}: expected exit {code}, got {result.returncode}; {payload.get('error', 'unexpected success')}")
-        require(not (result.stdout if code else result.stderr), "CLI used the wrong output stream")
+        require(not result.stderr, "CLI must emit JSON only on stdout")
         if code:
-            require(bool(payload.get("error")), "failed CLI call has no error")
-            if args[0] in cli.WRITES:
+            require(payload.get("ok") is False and bool(payload.get("error")), "failed CLI call has no JSON error")
+            if code != 2 and args[0] in cli.WRITES:
                 require(bool(payload.get("warning")), "failed write has no retry warning")
         else:
-            require(payload.get("ok") is True and "data" in payload, "invalid success response")
+            require(payload.get("ok") is True and ("data" in payload or "help" in payload), "invalid success response")
         return payload
 
     def api(self, endpoint, body, missing=False):
@@ -101,10 +102,11 @@ class LiveTests:
         require(stored["name"] == name and stored["description"] == description, "collection fields were not persisted")
         return data["id"]
 
-    def new_document(self, suffix, location, location_id, content_flag, content):
+    def new_document(self, suffix, location, location_id, content_flag=None, content=None, stdin=None):
         title = self.marker + " " + suffix
         self.document_titles.add(title)
-        return self.invoke("create", title, location, location_id, content_flag, content)["data"]
+        args = (content_flag, content) if content_flag else ()
+        return self.invoke("create", title, location, location_id, *args, stdin=stdin)["data"]
 
     def search_ids(self, *args):
         payload = self.invoke("search", *args)
@@ -130,9 +132,10 @@ class LiveTests:
         self.passed_case("collections pagination, offset and empty last page")
 
         original = "原始长期事实：机器名是测试机。"
-        parent = self.new_document("主题", "--collection", main, "--text", "主题正文，不应被子文档修改。")
+        parent = self.new_document("主题", "--collection", main)
         parent_body = self.invoke("read", parent["id"])["data"]["text"]
-        child = self.new_document("对象", "--parent", parent["id"], "--text", original)
+        require("分类目录节点" in parent_body, "omitted category body was not persisted")
+        child = self.new_document("对象", "--parent", parent["id"], "--file", "-", stdin=original)
         sibling_text = "文件创建的中文正文。\n\n第二段包含 Unicode：é。"
         with tempfile.TemporaryDirectory(prefix="outline-live-") as directory:
             path = Path(directory) / "中文 body.md"
@@ -141,7 +144,7 @@ class LiveTests:
             other = self.new_document("对照", "--collection", control, "--text", "用于验证集合筛选。")
             require(len(self.documents) == 4, "did not create four distinct documents")
             for document, collection_id, parent_id, fragments in (
-                (parent, main, None, ["主题正文，不应被子文档修改。"]),
+                (parent, main, None, ["分类目录节点"]),
                 (child, main, parent["id"], [original]),
                 (sibling, main, None, ["文件创建的中文正文。", "第二段包含 Unicode：é。"]),
                 (other, control, None, ["用于验证集合筛选。"]),
@@ -154,7 +157,11 @@ class LiveTests:
                 require(all(fragment in stored["text"] for fragment in fragments), "document body was not persisted")
                 alternative = self.invoke("read", stored["urlId"])["data"]
                 require(alternative["id"] == stored["id"] and alternative["text"] == stored["text"], "urlId read differs from UUID read")
-            self.passed_case("published root/child/file documents, persisted bodies and UUID/urlId reads")
+            self.passed_case("published category/stdin/file documents, persisted bodies and UUID/urlId reads")
+            self.invoke("append", child["id"], code=2)
+            help_payload = self.invoke("append", "--help")
+            require("标准输入" in help_payload["help"], "help omits stdin support")
+            self.passed_case("argument errors and help are valid stdout JSON without stderr")
 
             if fail_after_create:
                 raise InterruptedError("injected failure after creation")
@@ -194,9 +201,10 @@ class LiveTests:
             path.write_text("### 文件修订\n\n" + additions[1] + "\n\n" + code_block + "\n", encoding="utf-8")
             for identifier, flag, value, fragment in (
                 (child["id"], "--text", "### 文本修订\n\n" + additions[0], additions[0]),
-                (child["urlId"], "--file", str(path), additions[1]),
+                (child["urlId"], "--file", "-", additions[1]),
             ):
-                update = self.invoke("append", identifier, flag, value)["data"]
+                stdin = path.read_text(encoding="utf-8") if value == "-" else None
+                update = self.invoke("append", identifier, flag, value, stdin=stdin)["data"]
                 after = self.invoke("read", child["id"])["data"]
                 require(update["id"] == child["id"], "append returned the wrong document")
                 require(after["text"].startswith(before["text"].rstrip()), "append overwrote or reordered existing body")
@@ -215,8 +223,8 @@ class LiveTests:
 
             revision = before["revision"]
             path.write_bytes(b"\xff\xfe")
-            for flag, value in (("--text", " \n"), ("--file", str(Path(directory) / "missing.md")), ("--file", str(path))):
-                self.invoke("append", child["id"], flag, value, code=1)
+            for flag, value in (("--text", " \n"), ("--file", "-"), ("--file", str(Path(directory) / "missing.md")), ("--file", str(path))):
+                self.invoke("append", child["id"], flag, value, code=1, stdin="" if value == "-" else None)
             unchanged = self.invoke("read", child["id"])["data"]
             require(unchanged["text"] == before["text"] and unchanged["revision"] == revision, "rejected input changed persisted document")
             self.passed_case("blank/missing/non-UTF8 content rejected without changing data")

@@ -30,6 +30,16 @@ class CLIError(Exception):
     pass
 
 
+class ArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        key = os.environ.get("OUTLINE_API_KEY", "").strip()
+        print(json.dumps(redact({"ok": False, "error": f"参数错误: {message}"}, key), ensure_ascii=False))
+        raise SystemExit(2)
+
+    def print_help(self, file=None):
+        print(json.dumps({"ok": True, "help": self.format_help()}, ensure_ascii=False))
+
+
 def settings():
     url = os.environ.get("OUTLINE_BASE_URL", "").strip().rstrip("/")
     key = os.environ.get("OUTLINE_API_KEY", "").strip()
@@ -66,7 +76,7 @@ def offset_value(value):
 
 
 def parser():
-    result = argparse.ArgumentParser(description="直接调用 Outline HTTP API，读取 OUTLINE_BASE_URL / OUTLINE_API_KEY。")
+    result = ArgumentParser(description="直接调用 Outline HTTP API，读取 OUTLINE_BASE_URL / OUTLINE_API_KEY。")
     commands = result.add_subparsers(dest="command", required=True)
     collections = commands.add_parser("collections", help="列出可见集合")
     tree = commands.add_parser("tree", help="查看集合中的文档层级")
@@ -90,9 +100,9 @@ def parser():
     append = commands.add_parser("append", help="追加修改，不覆盖已有正文")
     append.add_argument("id", help="文档 UUID 或 urlId")
     for command in (create, append):
-        content = command.add_mutually_exclusive_group(required=True)
-        content.add_argument("--text", help="新增 Markdown 内容")
-        content.add_argument("--file", help="包含新增内容的 UTF-8 文件")
+        content = command.add_mutually_exclusive_group(required=command is append)
+        content.add_argument("--text", help="新增 Markdown 内容；仅分类目录可省略正文")
+        content.add_argument("--file", help="新增内容的 UTF-8 文件；- 表示标准输入")
     return result
 
 
@@ -102,7 +112,7 @@ def arguments(args):
     if args.command == "search":
         body = {"query": args.query, "limit": args.limit, "offset": args.offset}
         if args.collection:
-            body["filters"] = [{"field": "collectionId", "operator": "eq", "value": args.collection}]
+            body["collectionId"] = args.collection
         return body
     if args.command in {"tree", "read"}:
         return {"id": args.id}
@@ -112,9 +122,14 @@ def arguments(args):
             body["description"] = args.description
         return body
     try:
-        text = Path(args.file).expanduser().read_text(encoding="utf-8") if args.file else args.text
+        if args.file == "-":
+            text = sys.stdin.read()
+        elif args.file is not None:
+            text = Path(args.file).expanduser().read_text(encoding="utf-8")
+        else:
+            text = args.text if args.text is not None else "*(分类目录节点)*"
     except (OSError, UnicodeError):
-        raise CLIError("无法读取内容文件，请检查路径和 UTF-8 编码。") from None
+        raise CLIError("无法读取内容，请检查文件路径、标准输入和 UTF-8 编码。") from None
     if not text.strip():
         raise CLIError("新增内容不能为空。")
     if args.command == "append":
@@ -149,10 +164,11 @@ def main(argv=None):
             payload = response.json()
         if not isinstance(payload, dict) or "data" not in payload or payload.get("ok") is False:
             raise CLIError("Outline API 未返回有效数据，请检查实例地址和权限。")
+        payload["ok"] = True
     except KeyboardInterrupt:
         code = 130
-        payload = {"error": "调用已中断。"}
-    except (CLIError, httpx.HTTPError, json.JSONDecodeError) as error:
+        payload = {"ok": False, "error": "调用已中断。"}
+    except (CLIError, httpx.HTTPError, json.JSONDecodeError, UnicodeError) as error:
         code = 1
         if isinstance(error, CLIError):
             message = str(error)
@@ -175,10 +191,10 @@ def main(argv=None):
             message = "无法连接 Outline API，请检查网络和 TLS 配置。"
         else:
             message = "Outline API 未返回 JSON，请检查 OUTLINE_BASE_URL。"
-        payload = {"error": message}
+        payload = {"ok": False, "error": message}
     if code and args.command in WRITES:
         payload["warning"] = "不自动重试；先搜索或读取目标，确认是否已写入。"
-    print(json.dumps(redact(payload, key), ensure_ascii=False, indent=2), file=sys.stderr if code else sys.stdout)
+    print(json.dumps(redact(payload, key), ensure_ascii=False, indent=2))
     return code
 
 
