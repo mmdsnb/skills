@@ -19,7 +19,8 @@ npx skills@latest add mmdsnb/skills --skill=handoff-agent -a qoder
 
 | Skill | 说明 |
 |-------|------|
-| [handoff-agent](skills/handoff-agent/) | 在 opencode 和 qoder 之间切换会话 |
+| [handoff-agent](handoff-agent/) | 在 opencode 和 qoder 之间切换会话 |
+| [outline-memory](outline-memory/) | 跨 agent 按需读取与沉淀 Outline 长期知识，追加修订保留历史 |
 
 ## License
 
