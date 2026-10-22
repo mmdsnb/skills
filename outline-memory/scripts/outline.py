@@ -64,6 +64,20 @@ def settings():
     return url, key
 
 
+def sanitize_no_proxy():
+    for name in ("NO_PROXY", "no_proxy"):
+        value = os.environ.get(name)
+        if value is None:
+            continue
+        entries = [entry.strip() for entry in value.split(",")]
+        if "[::1]" not in entries:
+            continue
+        entries = [entry for entry in entries if entry and entry != "[::1]"]
+        if "::1" not in entries:
+            entries.append("::1")
+        os.environ[name] = ",".join(entries)
+
+
 def limit_value(value):
     value = int(value)
     if not 1 <= value <= 100:
@@ -209,6 +223,7 @@ def main(argv=None):
         body = arguments(args)
         if args.command in WRITES and any(key in value for value in body.values() if isinstance(value, str)):
             raise CLIError("待写入内容包含 API key，已拒绝写入。")
+        sanitize_no_proxy()
         with httpx.Client(headers={"Authorization": f"Bearer {key}", "Accept": "application/json"}, timeout=30, follow_redirects=False) as client:
             response = client.post(f"{url}/{ENDPOINTS[args.command]}", json=body)
             response.raise_for_status()
@@ -219,10 +234,12 @@ def main(argv=None):
     except KeyboardInterrupt:
         code = 130
         payload = {"ok": False, "error": "调用已中断。"}
-    except (CLIError, httpx.HTTPError, json.JSONDecodeError, UnicodeError) as error:
+    except (CLIError, httpx.InvalidURL, httpx.HTTPError, json.JSONDecodeError, UnicodeError) as error:
         code = 1
         if isinstance(error, CLIError):
             message = str(error)
+        elif isinstance(error, httpx.InvalidURL):
+            message = "URL 格式无效，请检查 OUTLINE_BASE_URL 和代理环境变量（HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / NO_PROXY）。"
         elif isinstance(error, httpx.HTTPStatusError):
             detail = ""
             try:

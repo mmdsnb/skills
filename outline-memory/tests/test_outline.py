@@ -299,6 +299,12 @@ class OutlineTests(unittest.TestCase):
                 self.assertNotIn(ENV["OUTLINE_API_KEY"], json.dumps(output))
                 self.assertEqual(len(requests), 1)
 
+    def test_no_proxy_bracketed_loopback_removed(self):
+        with patch.dict(os.environ, {"NO_PROXY": "localhost,127.0.0.1,::1,[::1]", "no_proxy": "[::1]"}, clear=True):
+            cli.sanitize_no_proxy()
+            self.assertEqual(os.environ["NO_PROXY"], "localhost,127.0.0.1,::1")
+            self.assertEqual(os.environ["no_proxy"], "::1")
+
     def test_missing_environment(self):
         for env in ({}, {"OUTLINE_BASE_URL": ENV["OUTLINE_BASE_URL"]}, {"OUTLINE_API_KEY": ENV["OUTLINE_API_KEY"]},
                     {"OUTLINE_URL": ENV["OUTLINE_BASE_URL"], "OUTLINE_API_KEY": ENV["OUTLINE_API_KEY"]}):
@@ -317,6 +323,15 @@ class OutlineTests(unittest.TestCase):
             code, _, requests = self.invoke(["collections"], env={**ENV, "OUTLINE_API_KEY": key})
             self.assertEqual(code, 1)
             self.assertEqual(requests, [])
+
+    def test_invalid_url_reports_hint(self):
+        code, output, requests = self.invoke(
+            ["read", "document-id"],
+            response=httpx.InvalidURL("Invalid port: ':1]'"),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("OUTLINE_BASE_URL", output["error"])
+        self.assertEqual(len(requests), 1)
 
     def test_interrupted_append_warns_without_traceback(self):
         code, output, requests = self.invoke(["append", "doc", "--text", "新修订"], response=KeyboardInterrupt())

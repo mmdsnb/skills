@@ -56,6 +56,7 @@ uv run --script "<skill_dir>/scripts/outline.py" <命令>
 - `edit` 的 stdin 是 JSON：`{"find": "原文片段", "new": "替换内容"}`。`find` 必须与正文精确匹配（含换行），服务端只替换第一处；匹配不到会报错，不会误写。
 - `edit` / `update` / `rename` 必须带 `--revision`（`read` 返回的 `data.revision`）；revision 过期返回 409，重新 `read` 后再改。
 - 正文用 stdin（`--file -`）或 `--file <路径>` 传入，不用 `--text` 拼接长文本。
+- 调用时沿用当前环境变量，不要自行设置或修改 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`。
 - 输出 JSON：`ok` 成败，`data` 数据；正文在 `data.text`，revision 在 `data.revision`；退出码 0 成功 / 1 调用错误 / 2 参数错误 / 130 中断。
 
 ## 读取（先查后答）
@@ -139,3 +140,4 @@ uv run --script "<skill_dir>/scripts/outline.py" <命令>
 - 409：重新 `read` 获取最新 revision 后重试；
 - 限流：按提示等待，不盲目重发；
 - 服务不可用：明确报错并停止，不写回本地。
+- URL 格式无效：先核对 `OUTLINE_BASE_URL` 是否为正确的实例地址；地址正确时，提示用户检查代理环境变量，不要自行改代理配置。
