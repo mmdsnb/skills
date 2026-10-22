@@ -22,8 +22,11 @@ ENDPOINTS = {
     "create-collection": "collections.create",
     "create": "documents.create",
     "append": "documents.update",
+    "edit": "documents.update",
+    "update": "documents.update",
+    "rename": "documents.update",
 }
-WRITES = {"create-collection", "create", "append"}
+WRITES = {"create-collection", "create", "append", "edit", "update", "rename"}
 
 
 class CLIError(Exception):
@@ -75,6 +78,13 @@ def offset_value(value):
     return value
 
 
+def revision_value(value):
+    value = int(value)
+    if value < 0:
+        raise argparse.ArgumentTypeError("revision 不能为负数")
+    return value
+
+
 def parser():
     result = ArgumentParser(description="直接调用 Outline HTTP API，读取 OUTLINE_BASE_URL / OUTLINE_API_KEY。")
     commands = result.add_subparsers(dest="command", required=True)
@@ -99,10 +109,27 @@ def parser():
     location.add_argument("--parent", help="父文档 ID")
     append = commands.add_parser("append", help="追加修改，不覆盖已有正文")
     append.add_argument("id", help="文档 UUID 或 urlId")
-    for command in (create, append):
-        content = command.add_mutually_exclusive_group(required=command is append)
-        content.add_argument("--text", help="新增 Markdown 内容；仅分类目录可省略正文")
-        content.add_argument("--file", help="新增内容的 UTF-8 文件；- 表示标准输入")
+    append.add_argument("--revision", type=revision_value, help="read 返回的 data.revision；提供时启用乐观锁")
+    edit = commands.add_parser("edit", help="定点替换文档中已存在的内容")
+    edit.add_argument("id", help="文档 UUID 或 urlId")
+    edit.add_argument("--revision", type=revision_value, required=True, help="read 返回的 data.revision，用于乐观锁")
+    update = commands.add_parser("update", help="整篇替换文档正文")
+    update.add_argument("id", help="文档 UUID 或 urlId")
+    update.add_argument("--revision", type=revision_value, required=True, help="read 返回的 data.revision，用于乐观锁")
+    rename = commands.add_parser("rename", help="修改文档标题")
+    rename.add_argument("id", help="文档 UUID 或 urlId")
+    rename.add_argument("--title", required=True, help="新标题")
+    rename.add_argument("--revision", type=revision_value, required=True, help="read 返回的 data.revision，用于乐观锁")
+    for command in (create, append, edit, update):
+        content = command.add_mutually_exclusive_group(required=command is not create)
+        if command is edit:
+            text_help = 'JSON 输入：{"find": "原文片段", "new": "替换内容"}'
+        elif command is create:
+            text_help = "Markdown 内容；仅分类目录可省略"
+        else:
+            text_help = "Markdown 内容"
+        content.add_argument("--text", help=text_help)
+        content.add_argument("--file", help="内容的 UTF-8 文件；- 表示标准输入")
     return result
 
 
@@ -121,6 +148,11 @@ def arguments(args):
         if args.description:
             body["description"] = args.description
         return body
+    if args.command == "rename":
+        title = args.title.strip()
+        if not title:
+            raise CLIError("标题不能为空。")
+        return {"id": args.id, "title": title, "lastRevision": args.revision}
     try:
         if args.file == "-":
             text = sys.stdin.read()
@@ -132,8 +164,27 @@ def arguments(args):
         raise CLIError("无法读取内容，请检查文件路径、标准输入和 UTF-8 编码。") from None
     if not text.strip():
         raise CLIError("新增内容不能为空。")
+    if args.command in {"edit", "update"}:
+        body = {"id": args.id, "lastRevision": args.revision}
+        if args.command == "update":
+            body.update({"text": text, "editMode": "replace"})
+            return body
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            raise CLIError('edit 输入必须是 JSON：{"find": "原文片段", "new": "替换内容"}') from None
+        if not isinstance(payload, dict) or set(payload) != {"find", "new"}:
+            raise CLIError('edit 输入必须且只能包含 find 和 new 两个字段。')
+        find, new = payload["find"], payload["new"]
+        if not isinstance(find, str) or not find.strip() or not isinstance(new, str):
+            raise CLIError("edit 的 find 必须是非空字符串，new 必须是字符串。")
+        body.update({"findText": find, "text": new, "editMode": "patch"})
+        return body
     if args.command == "append":
-        return {"id": args.id, "text": "\n\n" + text.lstrip("\r\n"), "editMode": "append"}
+        body = {"id": args.id, "text": "\n\n" + text.lstrip("\r\n"), "editMode": "append"}
+        if args.revision is not None:
+            body["lastRevision"] = args.revision
+        return body
     body = {"title": args.title, "text": text, "publish": True}
     body["parentDocumentId" if args.parent else "collectionId"] = args.parent or args.collection
     return body
@@ -184,7 +235,10 @@ def main(argv=None):
                     if isinstance(value, str) and value.strip():
                         detail = f" ({value.strip()})"
                         break
-            message = f"Outline API 返回 HTTP {error.response.status_code}{detail}，请检查地址、权限和请求参数。"
+            if error.response.status_code == 409:
+                message = f"文档已被其他会话修改（revision 冲突）{detail}；请重新 read 获取最新 revision 后重试。"
+            else:
+                message = f"Outline API 返回 HTTP {error.response.status_code}{detail}，请检查地址、权限和请求参数。"
         elif isinstance(error, httpx.TimeoutException):
             message = "Outline API 请求超时。"
         elif isinstance(error, httpx.HTTPError):

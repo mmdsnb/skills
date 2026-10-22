@@ -160,6 +160,83 @@ class OutlineTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(requests[0].content)["text"], "\n\n    indented code\n")
 
+    def test_edit_patches_existing_text_with_revision(self):
+        payload = {"find": "端口 587", "new": "端口 465（TLS）"}
+        code, _, requests = self.invoke(
+            ["edit", "document-id", "--revision", "34", "--file", "-"],
+            stdin=json.dumps(payload, ensure_ascii=False),
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(requests[0].url.path, "/api/documents.update")
+        self.assertEqual(json.loads(requests[0].content), {
+            "id": "document-id", "findText": "端口 587", "text": "端口 465（TLS）",
+            "editMode": "patch", "lastRevision": 34,
+        })
+
+    def test_update_replaces_document_with_revision(self):
+        code, _, requests = self.invoke(["update", "document-id", "--revision", "35", "--text", "# 新正文"])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(requests[0].content), {
+            "id": "document-id", "text": "# 新正文", "editMode": "replace", "lastRevision": 35,
+        })
+
+    def test_append_can_pass_revision(self):
+        code, _, requests = self.invoke(["append", "document-id", "--revision", "7", "--text", "新增章节"])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(requests[0].content), {
+            "id": "document-id", "text": "\n\n新增章节", "editMode": "append", "lastRevision": 7,
+        })
+
+    def test_edit_rejects_invalid_input_without_request(self):
+        cases = [
+            "not json",
+            json.dumps({}),
+            json.dumps({"find": "", "new": "x"}),
+            json.dumps({"find": "x", "new": 1}),
+            json.dumps({"find": "x", "new": "y", "extra": 1}),
+        ]
+        for stdin in cases:
+            with self.subTest(stdin=stdin):
+                code, output, requests = self.invoke(
+                    ["edit", "document-id", "--revision", "1", "--file", "-"], stdin=stdin)
+                self.assertEqual(code, 1)
+                self.assertIn("edit", output["error"])
+                self.assertEqual(requests, [])
+
+    def test_edit_requires_revision(self):
+        code, output, requests = self.invoke(
+            ["edit", "document-id", "--file", "-"],
+            stdin=json.dumps({"find": "a", "new": "b"}),
+        )
+        self.assertEqual(code, 2)
+        self.assertFalse(output["ok"])
+        self.assertEqual(requests, [])
+
+    def test_conflict_reports_revision_hint(self):
+        response = httpx.Response(409, json={"message": "Document revision mismatch"})
+        code, output, requests = self.invoke(
+            ["edit", "document-id", "--revision", "1", "--file", "-"],
+            response=response,
+            stdin=json.dumps({"find": "a", "new": "b"}),
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(len(requests), 1)
+        self.assertIn("重新 read", output["error"])
+
+    def test_rename_uses_revision(self):
+        code, _, requests = self.invoke(["rename", "document-id", "--title", "新标题", "--revision", "12"])
+        self.assertEqual(code, 0)
+        self.assertEqual(requests[0].url.path, "/api/documents.update")
+        self.assertEqual(json.loads(requests[0].content), {
+            "id": "document-id", "title": "新标题", "lastRevision": 12,
+        })
+
+    def test_rename_rejects_empty_title(self):
+        code, output, requests = self.invoke(["rename", "document-id", "--title", "   ", "--revision", "12"])
+        self.assertEqual(code, 1)
+        self.assertIn("标题", output["error"])
+        self.assertEqual(requests, [])
+
     def test_initialize_collection(self):
         code, _, requests = self.invoke(["create-collection", "个人知识", "--description", "长期上下文"])
         self.assertEqual(code, 0)
