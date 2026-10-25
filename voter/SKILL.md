@@ -1,72 +1,133 @@
 ---
 name: voter
-description: 对单个命题发起一次人工投票：在局域网网页上展示 Markdown 命题与可选图片，供用户选择「是 / 否 / 其他（从自定义候选中选）」，并返回投票结果 JSON。当需要人工确认图片分类、YOLO/标注复核、二选一或从少量候选中挑一个时使用；服务绑定 0.0.0.0，手机或另一台设备可直接作答。不适用于多题问卷、多人计票或需要登录权限的场景。
+description: 对单个命题或一批逐条复核发起人工投票：在局域网网页上展示 Markdown 命题与图片，点选「是 / 否 / 其他 / 跳过」，返回 JSON 结果。单条用 start；18 项这类批量确认用 batch，在同一服务里逐题展示、显示进度 N/M、支持上一题修改与跳过，最后总览提交。适用于 YOLO/标注复核、分类确认、二选一或从少量候选中挑一个；绑定 0.0.0.0，手机或另一台设备可直接作答。不适用于一屏多题问卷、多人计票或需要登录权限的场景。
 ---
 
 # 投票器
 
-## 流程
+把「找图 → 回表格 → 判断 → 记进度」压缩成一屏一题：命题、图片、选项、进度同时可见。单题一条 `start`，批量用 `batch`。
 
-1. `start` 在后台启动服务，把输出 JSON 里的 `url` 发给用户；
-2. 用户打开网页投票；
-3. `wait` 阻塞等待，输出结果 JSON。投票提交后服务自动退出。
+脚本只依赖 Python 标准库（3.10+）；可用 `python3` 或 `uv run --script` 运行。
 
-## 启动
+## 选模式
 
-短命题：
+| 场景 | 命令 |
+|---|---|
+| 确认一条命题 | `start` + `wait` |
+| 十几条以上同类复核（如 18 张 YOLO 图） | `batch` + `wait` |
+| 多人同时投票、计票 | 不适用 |
+
+## 单题
 
 ```sh
-uv run --script "<skill_dir>/scripts/voter.py" start \
-  --proposition "这张图片是否属于 **cat** 类？" \
-  --image ./frame-001.jpg \
-  --other cat --other dog \
-  --id frame-001
+python3 "<skill_dir>/scripts/voter.py" start \
+  --proposition "这张图片的主体是否属于 **cat** 类？" \
+  --image "裁剪框=./frame-001.png" \
+  --other cat --other dog --other bird \
+  --id frame-001 --progress 1/1
 ```
 
-多行 Markdown 命题用 stdin：
+多行 Markdown 用 stdin：
 
 ```sh
-uv run --script "<skill_dir>/scripts/voter.py" start --proposition-file - \
-  --image ./frame-001.jpg --other cat --other dog <<'EOF'
-## 复核
-这张图片是否属于 **cat** 类？
+python3 "<skill_dir>/scripts/voter.py" start --proposition-file - \
+  --image ./frame-001.png --other cat --other dog <<'EOF'
+## 图片分类复核
+这张图片的主体是否属于 **cat** 类？
 
-- 只判断主体类别
+- 只判断画面中央主体
 - 看不清按「否」
 EOF
 ```
 
 | 参数 | 说明 |
 |---|---|
-| `--proposition, -p <文本>` | 命题文本（Markdown） |
-| `--proposition-file, -f <路径>` | 从文件读取命题；`-` 表示 stdin |
-| `--image, -i <路径>` | 附加图片，可重复 |
-| `--other, -o <文本>` | 是/否之外的其他选项，可重复；缺省则只显示是/否 |
-| `--id <文本>` | 本次投票标识，写入结果 |
-| `--result <路径>` | 会话与结果文件，默认 `./voter-result.json` |
-| `--host <地址>` | 监听地址，默认 `0.0.0.0` |
-| `--port <端口>` | 默认 `0`（自动分配） |
-| `--timeout <秒>` | 服务存活时间，默认 900 |
+| `--proposition, -p` | 命题文本（Markdown） |
+| `--proposition-file, -f` | 从文件读取；`-` 表示 stdin |
+| `--image, -i` | 图片，可重复；`图注=路径` 可加说明 |
+| `--other, -o` | 其他选项，可重复；缺省则没有「其他」 |
+| `--yes-label / --no-label` | 改写按钮文字，如 `保留 / 删除` |
+| `--yes-hint / --no-hint` | 按钮副标题；改了 label 后默认不显示副标题 |
+| `--id` | 写出结果时带上标识 |
+| `--progress` | 页面角标，如 `7/18` |
+| `--result` | 会话与结果文件，默认 `./voter-result.json` |
+| `--host` | 默认 `0.0.0.0`；只本机用可给 `127.0.0.1` |
+| `--port` | 默认 `0`，随机端口 |
+| `--timeout` | 服务存活秒数，默认 900 |
 
-`start` 输出的 JSON 含 `url`（局域网地址）、`local_url`、`session` 和 `result` 路径。
+`start` 输出局域网 `url`（带随机 token）、本机 `local_url`、`port`、`session`、`result` 和 `expires_at`。`ok: true, pending: true` 表示服务已启动，不是投票已完成。
+
+启动后先告诉用户端口和两个地址：本机打开 `local_url`，手机或同局域网设备打开 `url`。然后调用 `wait`。
+
+## 批量复核
+
+写一个 manifest（图片路径相对 manifest 文件所在目录）：
+
+```json
+{
+  "title": "YOLO 标注复核（18 项）",
+  "labels": {"yes": "保留", "no": "删除"},
+  "other_options": ["cat", "dog", "bird"],
+  "items": [
+    {
+      "id": "778",
+      "proposition": "## 778\n图中主体的标注类别是否正确？",
+      "images": [
+        {"path": "frames/778.png", "caption": "原图 + 当前标注框"}
+      ]
+    },
+    {
+      "id": "805",
+      "proposition": "## 805\n图中主体的标注类别是否正确？",
+      "images": ["frames/805.png"],
+      "other_options": ["cat", "dog", "bird", "sheep"]
+    }
+  ]
+}
+```
+
+```sh
+python3 "<skill_dir>/scripts/voter.py" batch \
+  --manifest review.json --timeout 3600 --result review-result.json
+```
+
+| manifest 字段 | 说明 |
+|---|---|
+| `title` | 页面标题 |
+| `labels` | 全局按钮文字：`yes`、`no`、`yes_hint`、`no_hint` |
+| `other_options` | 全局其他选项；item 可覆盖 |
+| `items[].id` | 唯一标识，写入结果；缺省用序号 |
+| `items[].proposition` | 必填，Markdown |
+| `items[].images` | 路径字符串，或 `{path, caption}`；相对 manifest 目录 |
+| `items[].other_options` | 覆盖全局；给 `[]` 表示该题没有「其他」 |
+
+- 一屏一题：命题、图注、选项、进度条同时展示；点图片可开原图。
+- 点「是 / 否 / 跳过」立即记录并进下一题；「其他」选完点确认。
+- 顶部显示「第 n / N 题 · 已完成」，可回「上一题」修改。
+- 全部答完进入总览：逐条核对，点「修改」可回看原题，最后「提交结果」。
+- 快捷键：`Y` 是、`N` 否、`O` 其他、`S` 跳过。
+- 每答一题都会把进度写进结果文件；服务超时也会保留已答部分（`partial: true`）。
 
 ## 等待结果
 
 ```sh
-uv run --script "<skill_dir>/scripts/voter.py" wait --timeout 900
+python3 "<skill_dir>/scripts/voter.py" wait \
+  --result review-result.json --session <start 输出的 session>
 ```
 
-- 退出码 `0`：已投票，stdout 为结果 JSON。
-- 退出码 `124`：超时；服务到时会自动退出并写入 `error: "timeout"`。
-- 退出码 `1`：服务异常退出。
-- 工具调用本身超时（例如 10 分钟上限）时服务仍在运行，重新执行 `wait` 即可。
+- `--session` 建议必带：只接受本次会话，避免读到复用结果路径的旧文件；不带时会绑定第一次读到的运行中会话。
+- 不传 `--timeout` 时，跟随服务端的 `expires_at` 再等 15 秒；批量请把服务 `--timeout` 设足够长（如 3600）。
+- 默认输出精简 JSON（不含命题、图片路径）；需要完整结果加 `--full`，或直接读 `--result` 文件。
+- 退出码 `0`：完成；`124`：超时；`1`：服务异常或会话不匹配。
+- Agent 的工具调用本身超时（例如 10 分钟上限）时服务仍在跑，重新执行同一条 `wait` 即可。
 
-结果字段：
+单题结果：
 
 ```json
 {
   "ok": true,
   "pending": false,
+  "mode": "single",
   "session": "3f2a9c1b7d4e",
   "id": "frame-001",
   "choice": "cat",
@@ -76,16 +137,46 @@ uv run --script "<skill_dir>/scripts/voter.py" wait --timeout 900
 }
 ```
 
-- `choice_type`：`yes` / `no` / `other`。
-- `choice`：`yes`、`no`，或 `other` 时选中的具体选项。
-- `choice_label`：给人看的标签（「是」「否」或选项原文）。
+批量结果：
+
+```json
+{
+  "ok": true,
+  "pending": false,
+  "mode": "batch",
+  "session": "3f2a9c1b7d4e",
+  "summary": {
+    "total": 18,
+    "answered": 18,
+    "counts": {"yes": 12, "no": 4, "other": 1, "skip": 1},
+    "other_counts": {"bird": 1}
+  },
+  "answers": [
+    {"index": 0, "id": "778", "choice": "yes", "choice_type": "yes", "choice_label": "保留", "voted_at": "..."}
+  ]
+}
+```
+
+- `choice_type`：`yes` / `no` / `other` / `skip`。
+- `choice`：`yes`、`no`、跳过的 `skip`，或 other 时选中的具体选项。
+- `choice_label`：页面按钮文字或选项原文。
+- `answers` 与 manifest 顺序对齐；超时结果里未答项为 `null`。
+- 批量结果不重复存命题，审计时把 manifest 和结果一起保留。
 
 ## 规则
 
-- `start` 成功后第一件事是把 `url` 发给用户，然后 `wait`。
-- 一次只问一个明确命题；需要多题就在外部循环，每题独立 `start` + `wait`。
-- 命题支持标题、粗斜体、代码、列表、引用、表格、链接和 http(s) 图片，不渲染原始 HTML。
-- 并发多个投票必须给不同的 `--result`；端口默认随机，不会冲突。
-- 页面无鉴权，拿到 URL 的人都能投票；只在本人机器上用时加 `--host 127.0.0.1`。
-- 投票完成前不要移动或删除 `--image` 指向的文件。
-- 上一次会话的 `.log` 与结果文件可随时删除；排查启动失败时看 `<result>.log`。
+- `start` / `batch` 成功后先告诉用户端口和两个地址——本机 `local_url`、局域网 `url`——再调用 `wait`。
+- 每条 `wait` 带上 `start` 输出的 `session`；并发投票用不同的 `--result`。
+- 同一结果路径已有运行中的会话时，`start` / `batch` 会拒绝启动；等它结束或换路径。
+- URL 里有随机 token，拿到完整链接的人就能作答；不要转发到公开渠道。页面无登录，只有别人有链接才能打开。
+- 默认绑定 `0.0.0.0`，同一局域网手机可直接打开；只本机用时加 `--host 127.0.0.1`。
+- 命题和配置通过管道传给子进程，不出现在 `ps` 命令行里。
+- 投票完成前不要移动、改名或删除 manifest 和图片文件；图片按原路径实时读取。
+- 结果文件是审计记录，批量时保留；`<result>.log` 只在排查启动失败时有用，可随时删除。
+- 一次批量只给一位复核人用；多个标签页同时答题会以后写入的答案为准。
+- `skip` 表示「本次不判断」，不是「否」；统计时单独计数。
+
+## 边界
+
+- 不支持一屏多题的表单、多人实时计票、账号权限。
+- 需要保存题目快照或跨设备恢复时，保留 manifest + 结果 JSON 即可；服务本身不持久化答案历史，只保留每题最后一次选择。

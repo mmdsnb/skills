@@ -31,13 +31,20 @@ def run_cli(*args: str, input_text: str | None = None, timeout: float = 30):
     )
 
 
-def http_json(url: str, method: str = "GET", payload: dict | None = None):
+def http_json(
+    url: str,
+    method: str = "GET",
+    payload: dict | None = None,
+    headers: dict[str, str] | None = None,
+):
     data = None
-    headers = {}
+    request_headers = dict(headers or {})
     if payload is not None:
         data = json.dumps(payload).encode()
-        headers["Content-Type"] = "application/json"
-    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+        request_headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(
+        url, data=data, headers=request_headers, method=method
+    )
     try:
         with OPENER.open(request, timeout=5) as response:
             body = response.read()
@@ -53,6 +60,11 @@ def http_json(url: str, method: str = "GET", payload: dict | None = None):
         except ValueError:
             parsed = None
         return exc.code, parsed, body
+
+
+def http_fetch(url: str):
+    with OPENER.open(url, timeout=5) as response:
+        return response.status, response.headers, response.read()
 
 
 class MarkdownTests(unittest.TestCase):
@@ -127,7 +139,12 @@ class ServerTests(unittest.TestCase):
                     pass
         self.servers.clear()
 
-    def start(self, *extra: str, proposition: str = "**命题**", result_name: str = "result.json"):
+    def start(
+        self,
+        *extra: str,
+        proposition: str = "**命题**",
+        result_name: str = "result.json",
+    ):
         result_path = self.dir / result_name
         args = [
             "start",
@@ -144,9 +161,50 @@ class ServerTests(unittest.TestCase):
         proc = run_cli(*args)
         self.assertEqual(proc.returncode, 0, msg=proc.stderr + proc.stdout)
         state = json.loads(proc.stdout.strip().splitlines()[-1])
-        self.assertTrue(state["url"])
+        self.assertTrue(state["ok"])
+        self.assertTrue(state["pending"])
+        self.assertTrue(state["url"].endswith("/"))
         self.servers.append((state["pid"], str(result_path)))
         return state, result_path
+
+    def start_batch(self, manifest: dict | Path, *extra: str, result_name="batch.json"):
+        if isinstance(manifest, dict):
+            manifest_path = self.dir / result_name.replace(".json", ".manifest.json")
+            manifest_path.write_text(
+                json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+            )
+        else:
+            manifest_path = manifest
+        result_path = self.dir / result_name
+        args = [
+            "batch",
+            "--manifest",
+            str(manifest_path),
+            "--host",
+            "127.0.0.1",
+            "--result",
+            str(result_path),
+            "--timeout",
+            "20",
+            *extra,
+        ]
+        proc = run_cli(*args)
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr + proc.stdout)
+        state = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertTrue(state["ok"])
+        self.assertTrue(state["pending"])
+        self.servers.append((state["pid"], str(result_path)))
+        return state, result_path
+
+    def wait_final(self, result_path: Path, timeout: float = 8):
+        deadline = time.monotonic() + timeout
+        state = None
+        while time.monotonic() < deadline:
+            state = voter.read_json(result_path)
+            if state and state.get("pending") is False:
+                return state
+            time.sleep(0.05)
+        self.fail(f"结果未在 {timeout}s 内完成: {state}")
 
     def test_vote_flow(self):
         image = self.dir / "frame.png"
@@ -160,20 +218,42 @@ class ServerTests(unittest.TestCase):
             "--id",
             "frame-001",
             "--image",
-            str(image),
+            f"裁剪框={image}",
+            "--yes-label",
+            "保留",
+            "--no-label",
+            "删除",
+            "--progress",
+            "7/18",
         )
         base = state["url"]
+        self.assertEqual(state["mode"], "single")
+        self.assertEqual(
+            state["images"],
+            [{"path": str(image.resolve()), "caption": "裁剪框"}],
+        )
+        self.assertGreater(state["expires_epoch"], time.time())
 
-        status, _, body = http_json(base)
+        status, headers, body = http_fetch(base)
         self.assertEqual(status, 200)
         page = body.decode()
         self.assertIn("<strong>命题</strong>", page)
         self.assertIn("cat", page)
         self.assertIn("请选择…", page)
         self.assertIn("frame-001", page)
+        self.assertIn("裁剪框", page)
+        self.assertIn("保留", page)
+        self.assertIn("删除", page)
+        self.assertIn("7/18", page)
+        self.assertIn('src="image/0"', page)
+        self.assertIn('href="image/0"', page)
+        self.assertIn("跳过", page)
+        self.assertIn("frame-ancestors 'none'", headers["Content-Security-Policy"])
+        self.assertEqual(headers["X-Frame-Options"], "DENY")
 
         status, data, _ = http_json(base + "health")
         self.assertEqual((status, data["pending"]), (200, True))
+        self.assertEqual(data["mode"], "single")
 
         status, data, _ = http_json(base + "result")
         self.assertEqual((status, data["pending"]), (202, True))
@@ -200,45 +280,158 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(data["result"]["choice_type"], "other")
         self.assertEqual(data["result"]["id"], "frame-001")
 
-        self.assertEqual(
-            http_json(base + "vote", "POST", {"choice": "yes"})[0], 409
-        )
+        self.assertEqual(http_json(base + "vote", "POST", {"choice": "yes"})[0], 409)
 
         saved = voter.read_json(result_path)
         self.assertEqual(saved["session"], state["session"])
-        self.assertEqual(saved["images"], [str(image.resolve())])
+        self.assertEqual(
+            saved["images"],
+            [{"path": str(image.resolve()), "caption": "裁剪框"}],
+        )
         self.assertFalse(saved["pending"])
 
-        waited = run_cli("wait", "--result", str(result_path), "--timeout", "5")
+        waited = run_cli(
+            "wait",
+            "--result",
+            str(result_path),
+            "--session",
+            state["session"],
+        )
         self.assertEqual(waited.returncode, 0, msg=waited.stderr)
-        self.assertEqual(json.loads(waited.stdout)["choice"], "cat")
+        compact = json.loads(waited.stdout)
+        self.assertEqual(compact["choice"], "cat")
+        self.assertNotIn("proposition", compact)
 
-    def test_yes_and_no(self):
+        full = run_cli(
+            "wait",
+            "--result",
+            str(result_path),
+            "--session",
+            state["session"],
+            "--full",
+        )
+        self.assertEqual(full.returncode, 0, msg=full.stderr)
+        self.assertIn("命题", json.loads(full.stdout)["proposition"])
+
+    def test_yes_and_no_labels(self):
         for choice in ("yes", "no"):
             with self.subTest(choice=choice):
-                state, result_path = self.start(result_name=f"{choice}.json")
+                state, _ = self.start(
+                    "--yes-label", "通过", "--no-label", "驳回",
+                    result_name=f"{choice}.json",
+                )
+                page = http_fetch(state["url"])[2].decode()
+                self.assertIn("通过", page)
+                self.assertIn("驳回", page)
+                self.assertNotIn("命题成立", page)
                 status, data, _ = http_json(
                     state["url"] + "vote", "POST", {"choice": choice}
                 )
                 self.assertEqual(status, 200)
                 self.assertEqual(data["result"]["choice"], choice)
                 self.assertEqual(data["result"]["choice_type"], choice)
+                self.assertEqual(
+                    data["result"]["choice_label"],
+                    "通过" if choice == "yes" else "驳回",
+                )
+
+    def test_skip(self):
+        state, result_path = self.start()
+        status, data, _ = http_json(
+            state["url"] + "vote", "POST", {"choice": "skip"}
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(data["result"]["choice_type"], "skip")
+        self.assertEqual(data["result"]["choice_label"], "跳过")
+        self.assertEqual(self.wait_final(result_path)["choice"], "skip")
+
+    def test_token_and_origin_checks(self):
+        state, _ = self.start()
+        root = f"http://127.0.0.1:{state['port']}/"
+        self.assertEqual(http_json(root)[0], 404)
+        self.assertEqual(
+            http_json(f"{root}t/aaaaaaaaaaaaaaaa/")[0], 404
+        )
+        self.assertEqual(http_json(root + "health")[0], 200)
+        self.assertEqual(
+            http_json(
+                state["url"] + "vote",
+                "POST",
+                {"choice": "yes"},
+                headers={"Origin": "http://evil.example"},
+            )[0],
+            403,
+        )
+        self.assertEqual(
+            http_json(
+                state["url"] + "vote",
+                "POST",
+                {"choice": "yes"},
+                headers={"Sec-Fetch-Site": "cross-site"},
+            )[0],
+            403,
+        )
+        status, _, _ = http_json(
+            state["url"] + "vote",
+            "POST",
+            {"choice": "yes"},
+            headers={"Sec-Fetch-Site": "same-origin"},
+        )
+        self.assertEqual(status, 200)
+
+    def test_result_path_in_use_is_rejected(self):
+        _, result_path = self.start()
+        proc = run_cli(
+            "start",
+            "-p",
+            "x",
+            "--host",
+            "127.0.0.1",
+            "--result",
+            str(result_path),
+            "--timeout",
+            "20",
+        )
+        self.assertEqual(proc.returncode, 2, msg=proc.stderr + proc.stdout)
+        self.assertIn("占用", json.loads(proc.stdout)["error"])
+
+    def test_wait_session_binding(self):
+        state, result_path = self.start()
+        http_json(state["url"] + "vote", "POST", {"choice": "no"})
+        self.wait_final(result_path)
+        waited = run_cli(
+            "wait",
+            "--result",
+            str(result_path),
+            "--session",
+            "deadbeefdead",
+        )
+        self.assertEqual(waited.returncode, 1)
+        self.assertEqual(json.loads(waited.stdout)["error"], "结果文件属于其他会话")
 
     def test_server_timeout(self):
-        state, result_path = self.start("--timeout", "0.6", result_name="timeout.json")
-        deadline = time.monotonic() + 5
-        saved = None
-        while time.monotonic() < deadline:
-            saved = voter.read_json(result_path)
-            if saved and saved.get("pending") is False:
-                break
-            time.sleep(0.05)
-        self.assertIsNotNone(saved)
-        self.assertFalse(saved["pending"])
+        state, result_path = self.start("--timeout", "2", result_name="timeout.json")
+        saved = self.wait_final(result_path)
         self.assertEqual(saved["error"], "timeout")
+        self.assertFalse(saved["ok"])
 
-        waited = run_cli("wait", "--result", str(result_path), "--timeout", "5")
+        waited = run_cli(
+            "wait",
+            "--result",
+            str(result_path),
+            "--session",
+            state["session"],
+        )
         self.assertEqual(waited.returncode, 124)
+        self.assertEqual(json.loads(waited.stdout)["error"], "timeout")
+
+    def test_wait_default_follows_server_expiry(self):
+        _, result_path = self.start("--timeout", "2", result_name="wait-native.json")
+        started = time.monotonic()
+        waited = run_cli("wait", "--result", str(result_path))
+        elapsed = time.monotonic() - started
+        self.assertEqual(waited.returncode, 124)
+        self.assertLess(elapsed, 5)
         self.assertEqual(json.loads(waited.stdout)["error"], "timeout")
 
     def test_wait_without_server_times_out(self):
@@ -267,8 +460,220 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, msg=proc.stderr + proc.stdout)
         state = json.loads(proc.stdout.strip().splitlines()[-1])
         self.servers.append((state["pid"], str(result_path)))
-        _, _, body = http_json(state["url"])
-        self.assertIn("<h1>来自 stdin</h1>", body.decode())
+        page = http_fetch(state["url"])[2].decode()
+        self.assertIn("<h1>来自 stdin</h1>", page)
+
+    def test_batch_flow(self):
+        (self.dir / "a.png").write_bytes(b"\x89PNG\r\n\x1a\nA")
+        (self.dir / "b.png").write_bytes(b"\x89PNG\r\n\x1a\nB")
+        manifest = {
+            "title": "YOLO 复核",
+            "labels": {"yes": "保留", "no": "删除"},
+            "other_options": ["cat", "dog"],
+            "items": [
+                {
+                    "id": "778",
+                    "proposition": "第一项是否 cat？",
+                    "images": [
+                        {"path": "a.png", "caption": "任务 778 裁剪"}
+                    ],
+                },
+                {
+                    "id": "805",
+                    "proposition": "第二项是否 cat？",
+                    "images": ["b.png"],
+                    "other_options": ["bird"],
+                },
+            ],
+        }
+        state, result_path = self.start_batch(manifest)
+        base = state["url"]
+        self.assertEqual(state["total"], 2)
+        self.assertEqual(state["answered"], 0)
+        self.assertEqual(state["mode"], "batch")
+
+        page = http_fetch(base)[2].decode()
+        self.assertIn("第 1 / 2 题", page)
+        self.assertIn("任务 778 裁剪", page)
+        self.assertIn('src="image/0/0"', page)
+        self.assertIn('href="image/0/0"', page)
+        self.assertIn("保留", page)
+        self.assertIn("cat", page)
+        self.assertNotIn("bird", page)
+
+        status, data, _ = http_json(
+            base + "vote", "POST", {"index": 0, "choice": "yes"}
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(data["next"], 1)
+        self.assertFalse(data["all_answered"])
+        self.assertEqual(data["answer"]["choice_label"], "保留")
+
+        page = http_fetch(base + "?item=1")[2].decode()
+        self.assertIn("第 2 / 2 题", page)
+        self.assertIn("bird", page)
+        self.assertIn('src="image/1/0"', page)
+
+        status, data, _ = http_json(
+            base + "vote",
+            "POST",
+            {"index": 1, "choice": "other", "other": "bird"},
+        )
+        self.assertEqual(status, 200)
+        self.assertIsNone(data["next"])
+        self.assertTrue(data["all_answered"])
+        self.assertEqual(data["summary"]["counts"]["yes"], 1)
+        self.assertEqual(data["summary"]["counts"]["other"], 1)
+
+        summary = http_fetch(base)[2].decode()
+        self.assertIn("提交结果", summary)
+        self.assertIn("已完成 2 / 2", summary)
+        self.assertIn("保留", summary)
+        self.assertIn("bird", summary)
+        self.assertIn('href="?item=0"', summary)
+
+        status, final, _ = http_json(base + "submit", "POST", {})
+        self.assertEqual(status, 200)
+        self.assertTrue(final["ok"])
+        self.assertEqual(final["summary"]["answered"], 2)
+        self.assertEqual(
+            final["summary"]["other_counts"], {"bird": 1}
+        )
+
+        waited = run_cli(
+            "wait",
+            "--result",
+            str(result_path),
+            "--session",
+            state["session"],
+        )
+        self.assertEqual(waited.returncode, 0, msg=waited.stderr)
+        compact = json.loads(waited.stdout)
+        self.assertEqual(compact["summary"]["total"], 2)
+        self.assertEqual(compact["answers"][0]["choice"], "yes")
+        self.assertEqual(compact["answers"][1]["choice"], "bird")
+
+    def test_batch_skip_and_revision(self):
+        manifest = {
+            "title": "复核",
+            "items": [
+                {"id": "a", "proposition": "A？"},
+                {"id": "b", "proposition": "B？"},
+            ],
+        }
+        state, _ = self.start_batch(manifest)
+        base = state["url"]
+        status, data, _ = http_json(
+            base + "vote", "POST", {"index": 0, "choice": "skip"}
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(data["next"], 1)
+        status, data, _ = http_json(
+            base + "vote", "POST", {"index": 1, "choice": "no"}
+        )
+        self.assertEqual(status, 200)
+        self.assertIsNone(data["next"])
+
+        page = http_fetch(base + "?item=0")[2].decode()
+        self.assertIn("当前：跳过", page)
+        self.assertIn("查看总览", page)
+
+        status, data, _ = http_json(
+            base + "vote", "POST", {"index": 0, "choice": "yes"}
+        )
+        self.assertEqual(status, 200)
+        self.assertIsNone(data["next"])
+        self.assertEqual(data["summary"]["counts"]["skip"], 0)
+        self.assertEqual(data["summary"]["counts"]["yes"], 1)
+
+        status, final, _ = http_json(base + "submit", "POST", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(final["answers"][0]["choice"], "yes")
+
+    def test_batch_submit_early_and_bad_index(self):
+        manifest = {
+            "items": [
+                {"id": "a", "proposition": "A？"},
+                {"id": "b", "proposition": "B？"},
+            ]
+        }
+        state, _ = self.start_batch(manifest)
+        base = state["url"]
+        self.assertEqual(http_json(base + "submit", "POST", {})[0], 409)
+        self.assertEqual(
+            http_json(base + "vote", "POST", {"index": 5, "choice": "yes"})[0], 400
+        )
+        self.assertEqual(
+            http_json(base + "vote", "POST", {"choice": "yes"})[0], 400
+        )
+        self.assertEqual(
+            http_json(
+                base + "vote", "POST", {"index": 0, "choice": "other", "other": "x"}
+            )[0],
+            400,
+        )
+
+    def test_batch_timeout_keeps_partial_answers(self):
+        manifest = {
+            "items": [
+                {"id": "a", "proposition": "A？"},
+                {"id": "b", "proposition": "B？"},
+            ]
+        }
+        state, result_path = self.start_batch(
+            manifest, "--timeout", "2", result_name="batch-timeout.json"
+        )
+        http_json(state["url"] + "vote", "POST", {"index": 0, "choice": "yes"})
+        saved = self.wait_final(result_path)
+        self.assertEqual(saved["error"], "timeout")
+        self.assertTrue(saved["partial"])
+        self.assertEqual(saved["summary"]["answered"], 1)
+        self.assertIsNotNone(saved["answers"][0])
+        self.assertIsNone(saved["answers"][1])
+
+        waited = run_cli(
+            "wait",
+            "--result",
+            str(result_path),
+            "--session",
+            state["session"],
+        )
+        self.assertEqual(waited.returncode, 124)
+        compact = json.loads(waited.stdout)
+        self.assertEqual(compact["summary"]["answered"], 1)
+        self.assertTrue(compact["partial"])
+
+    def test_batch_manifest_errors(self):
+        cases = {
+            "empty": {"items": []},
+            "no-proposition": {"items": [{"id": "1"}]},
+            "duplicate-id": {
+                "items": [
+                    {"id": "1", "proposition": "A"},
+                    {"id": "1", "proposition": "B"},
+                ]
+            },
+            "missing-image": {
+                "items": [
+                    {"id": "1", "proposition": "A", "images": ["nope.png"]}
+                ]
+            },
+        }
+        for name, manifest in cases.items():
+            with self.subTest(name=name):
+                path = self.dir / f"{name}.json"
+                path.write_text(
+                    json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+                )
+                proc = run_cli(
+                    "batch",
+                    "--manifest",
+                    str(path),
+                    "--result",
+                    str(self.dir / f"{name}-result.json"),
+                )
+                self.assertEqual(proc.returncode, 2, msg=proc.stderr + proc.stdout)
+                self.assertTrue(json.loads(proc.stdout)["error"])
 
 
 class CliTests(unittest.TestCase):
@@ -285,6 +690,11 @@ class CliTests(unittest.TestCase):
     def test_bad_port_is_usage_error(self):
         proc = run_cli("start", "-p", "x", "--port", "70000")
         self.assertEqual(proc.returncode, 2)
+
+    def test_bad_token_is_usage_error(self):
+        proc = run_cli("start", "-p", "x", "--token", "bad token")
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("--token", json.loads(proc.stdout)["error"])
 
 
 if __name__ == "__main__":
