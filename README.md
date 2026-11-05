@@ -22,6 +22,7 @@ npx skills@latest add mmdsnb/skills --skill=outline-memory -a qoder
 | [outline-memory](outline-memory/) | 跨 agent 按需读取与沉淀 Outline 长期知识，追加修订保留历史 |
 | [outsource-agent](outsource-agent/) | 把目录/任务外包给便宜模型，干净上下文、只读文件、结果直返 |
 | [voter](voter/) | 局域网人工复核：单题或批量逐条投票，图片 + Markdown、进度/跳过/总览，结果 JSON |
+| [web-e2e](web-e2e/) | Web 端到端测试规范：Playwright + browserless CDP，tests/ 目录与功能增量约定 |
 
 ## License
 
