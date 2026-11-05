@@ -2,3 +2,7 @@
 .qoder/
 
 spec3.json
+
+# Python
+__pycache__/
+*.py[cod]
