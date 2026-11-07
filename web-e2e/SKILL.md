@@ -8,6 +8,9 @@ description: Web 端到端测试（E2E）的项目规范。规定 Playwright Tes
 ## 环境与连接
 
 - 浏览器走远端 browserless CDP，地址由环境变量 `E2E_CDP_ENDPOINT` 提供（含 token）。
+- `E2E_CDP_ENDPOINT` 必须带 `timeout` 参数，如 `?token=...&timeout=300000`。browserless 默认 30 秒回收 session，整套用例超过后被远端掐断，表现为 `Target page, context or browser has been closed` 或 `was not bound in the connection`。
+- 不要调用 `browser.close()`：CDP 连的是共享浏览器，close 会连带关闭其他 worker 正在用的实例；worker teardown 只断开连接。
+- 需要固定视口时，在 `page.goto` 之后调用 `setViewportSize`，导航前设置会被重置为 800x600。
 - 被测地址由 `E2E_BASE_URL` 提供，必须是 browserless 侧可达的地址。
 - 两个值写在项目根目录 `tests/e2e.env`（gitignore）；`tests/support/env.ts` 手动解析，Playwright 不会自动加载 `.env`。
 - 连接方式：worker-scoped fixture 里 `chromium.connectOverCDP(E2E_CDP_ENDPOINT)`。不要用 `use.connectOptions`，它走 Playwright 协议，browserless 只提供 CDP。
