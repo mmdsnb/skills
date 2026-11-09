@@ -6,3 +6,9 @@ spec3.json
 # Python
 __pycache__/
 *.py[cod]
+
+# Node / E2E
+node_modules/
+test-results/
+playwright-report/
+**/tests/e2e.env
