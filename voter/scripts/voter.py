@@ -285,70 +285,258 @@ def render_markdown(source: str) -> str:
 
 
 CSS = """
-:root { color-scheme: light; --bg:#f5f6f8; --card:#fff; --fg:#1c1e21; --muted:#6b7280; --line:#e3e6ea; --accent:#2563eb; --accent-soft:#eff5ff; --ok:#15803d; --err:#b91c1c; }
+:root {
+  color-scheme: light;
+  --bench: #e1e4de;
+  --sheet: #fcfcfa;
+  --ink: #15191b;
+  --ink-2: #5d655f;
+  --rule: #c3c9c2;
+  --rule-soft: #dde1da;
+  --signal: #0e5c57;
+  --signal-soft: #e3eeeb;
+  --flag: #a26b16;
+  --flag-soft: #f5ead6;
+  --err: #a3231b;
+  --r: 3px;
+  --mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+}
 * { box-sizing: border-box; }
-body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
-main { max-width:760px; margin:0 auto; padding:16px; }
-.card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
-.meta { display:flex; align-items:center; gap:8px; flex-wrap:wrap; color:var(--muted); font-size:13px; margin-bottom:12px; }
-.badge { background:var(--accent-soft); color:var(--accent); border-radius:999px; padding:2px 10px; font-weight:600; word-break:break-all; }
-.badge.progress { background:#fff7ed; color:#c2410c; }
-.badge.current { background:#ecfdf5; color:#047857; }
-.bar { height:4px; background:var(--line); border-radius:999px; margin:0 0 16px; overflow:hidden; }
-.bar > span { display:block; height:100%; background:var(--accent); transition:width .2s; }
-.proposition { margin:0 0 18px; }
-.proposition > :first-child { margin-top:0; }
-.proposition > :last-child { margin-bottom:0; }
-.proposition h1,.proposition h2,.proposition h3,.proposition h4 { line-height:1.3; margin:1.1em 0 .5em; }
-.proposition h1 { font-size:1.5em; } .proposition h2 { font-size:1.3em; } .proposition h3 { font-size:1.15em; }
-.proposition p { margin:.6em 0; }
-.proposition ul,.proposition ol { margin:.6em 0; padding-left:1.4em; }
-.proposition code { background:#f0f2f5; border-radius:4px; padding:.1em .35em; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.9em; }
-.proposition pre { background:#111827; color:#f9fafb; padding:12px 14px; border-radius:8px; overflow:auto; }
-.proposition pre code { background:none; padding:0; color:inherit; }
-.proposition blockquote { margin:.8em 0; padding:.2em 0 .2em 14px; border-left:3px solid var(--line); color:var(--muted); }
-.proposition table { width:100%; border-collapse:collapse; margin:.8em 0; font-size:.95em; }
-.proposition th,.proposition td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
-.proposition th { background:#f7f8fa; font-weight:600; }
-.table-wrap { overflow-x:auto; }
-.proposition img { max-width:100%; border-radius:8px; }
-.proposition hr { border:0; border-top:1px solid var(--line); margin:1.2em 0; }
-figure { margin:0 0 16px; }
-figure a { display:block; }
-figure img { display:block; width:100%; max-height:62vh; object-fit:contain; background:#fafafa; border:1px solid var(--line); border-radius:10px; cursor:zoom-in; }
-figcaption { color:var(--muted); font-size:12px; margin-top:6px; word-break:break-all; }
-.choices { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; margin-top:6px; }
-.choice { appearance:none; border:1.5px solid var(--line); background:#fff; border-radius:12px; padding:16px 12px; font:inherit; font-weight:600; color:var(--fg); cursor:pointer; transition:border-color .12s, background .12s, transform .06s; min-height:64px; }
-.choice small { display:block; color:var(--muted); font-weight:400; font-size:12px; margin-top:2px; }
-.choice:hover { border-color:#c7ccd3; }
-.choice:active { transform:scale(.99); }
-.choice.active { border-color:var(--accent); background:var(--accent-soft); color:var(--accent); }
-.choice.skip { border-style:dashed; color:var(--muted); }
-.choice:disabled { opacity:.55; cursor:default; }
-#other-box { margin-top:12px; }
-#other-box label { display:block; color:var(--muted); font-size:13px; margin-bottom:6px; }
-select { width:100%; padding:12px; border:1.5px solid var(--line); border-radius:10px; background:#fff; font:inherit; color:var(--fg); }
-.primary { width:100%; margin-top:16px; padding:14px; border:0; border-radius:12px; background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
-.primary:disabled { background:#c9d3e3; cursor:default; }
-.nav-row { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:0 0 12px; font-size:13px; }
-.nav-row a { color:var(--accent); text-decoration:none; }
-.muted { color:var(--muted); }
-.ledger { width:100%; border-collapse:collapse; font-size:14px; }
-.ledger th,.ledger td { border-bottom:1px solid var(--line); padding:9px 8px; text-align:left; vertical-align:top; }
-.ledger th { color:var(--muted); font-weight:600; font-size:12px; }
-.ledger a { color:var(--accent); text-decoration:none; }
-.summary-lead { margin:0 0 14px; color:var(--muted); }
-#status { min-height:1.5em; margin:10px 0 0; font-size:14px; }
-#status.ok { color:var(--ok); } #status.err { color:var(--err); }
-.hint { color:var(--muted); font-size:12px; margin:12px 0 0; }
-[hidden] { display:none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bench);
+  color: var(--ink);
+  font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+main { max-width: 700px; margin: 0 auto; padding: 12px 12px calc(var(--dock-h, 190px) + 12px); }
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+.head { display: flex; flex-direction: column; gap: 8px; padding: 2px 2px 0; }
+.head-row { display: flex; align-items: center; gap: 10px; min-height: 32px; }
+.head-spacer { flex: 1; }
+.ident {
+  font: 13px/1 var(--mono); letter-spacing: .04em; color: var(--ink-2);
+  padding: 6px 7px; border: 1px solid var(--rule); border-radius: var(--r); background: var(--sheet);
+  overflow-wrap: anywhere; min-width: 0; flex: 0 1 auto;
+}
+.pos { font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+.count { font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+.skip-link {
+  appearance: none; font: inherit; font-size: 13px; color: var(--ink-2);
+  background: transparent; border: 1px solid var(--rule); border-radius: var(--r);
+  padding: 7px 12px; cursor: pointer; min-height: 34px;
+}
+.skip-link:hover { color: var(--ink); border-color: var(--ink-2); }
+
+.rail { display: flex; gap: 2px; }
+.tally { flex: 1 1 0; height: 6px; background: var(--rule-soft); border-radius: 1px; }
+.tally.yes, .tally.no { background: var(--ink); }
+.tally.other { background: var(--signal); }
+.tally.skip { background: var(--flag); }
+.tally.here { outline: 1.5px solid var(--signal); outline-offset: 2px; }
+
+.sheet {
+  margin-top: 10px; padding: 16px;
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--r);
+}
+
+.proposition { max-width: 62ch; }
+.proposition > :first-child { margin-top: 0; }
+.proposition > :last-child { margin-bottom: 0; }
+.proposition h1, .proposition h2, .proposition h3, .proposition h4 {
+  margin: 1.1em 0 .45em; line-height: 1.3; font-weight: 650; letter-spacing: -.01em;
+}
+.proposition h1 { font-size: 1.32rem; }
+.proposition h2 { font-size: 1.18rem; }
+.proposition h3 { font-size: 1.06rem; }
+.proposition p, .proposition li { font-size: 1rem; line-height: 1.65; }
+.proposition p { margin: .55em 0; }
+.proposition ul, .proposition ol { margin: .55em 0; padding-left: 1.3em; }
+.proposition li + li { margin-top: .25em; }
+.proposition code {
+  font-family: var(--mono); font-size: .88em; background: var(--bench);
+  border: 1px solid var(--rule-soft); border-radius: 2px; padding: .05em .3em;
+}
+.proposition pre {
+  background: var(--ink); color: #f2f3f0; padding: 12px 14px;
+  border-radius: var(--r); overflow: auto; font-size: .86rem;
+}
+.proposition pre code { background: none; border: 0; padding: 0; color: inherit; }
+.proposition blockquote {
+  margin: .8em 0; padding-left: 12px; border-left: 2px solid var(--signal); color: var(--ink-2);
+}
+.proposition table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+.proposition th, .proposition td {
+  border-bottom: 1px solid var(--rule-soft); padding: 7px 8px; text-align: left; vertical-align: top;
+}
+.proposition th { border-bottom-color: var(--rule); font-weight: 600; }
+.proposition hr { border: 0; border-top: 1px solid var(--rule); margin: 1.1em 0; }
+.table-wrap { overflow-x: auto; }
+
+figure { margin: 14px 0 0; }
+figure a {
+  display: block; position: relative; background: #fff;
+  border: 1px solid var(--rule); border-radius: var(--r);
+}
+figure a::before, figure a::after {
+  content: ""; position: absolute; width: 9px; height: 9px;
+  border-color: var(--signal); border-style: solid; pointer-events: none;
+}
+figure a::before { top: -1px; left: -1px; border-width: 2px 0 0 2px; }
+figure a::after { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
+figure img { display: block; width: 100%; max-height: 42vh; object-fit: contain; border-radius: 2px; cursor: zoom-in; }
+figcaption {
+  display: flex; justify-content: space-between; gap: 10px;
+  margin-top: 6px; font-size: 12px; color: var(--ink-2);
+}
+figcaption .name { overflow-wrap: anywhere; }
+figcaption .zoom { color: var(--signal); white-space: nowrap; }
+
+.nav-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--rule-soft); font-size: 13px;
+}
+.nav-row .count { display: none; }
+.nav-row a { color: var(--signal); text-decoration: none; }
+.nav-row .rec { color: var(--signal); white-space: nowrap; }
+.nav-row .rec::before {
+  content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px;
+  border-radius: 50%; background: currentColor; vertical-align: 1px;
+}
+.nav-row a:hover { text-decoration: underline; }
+
+form { margin: 0; }
+.dock {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+  background: rgba(252, 252, 250, .97);
+  border-top: 1px solid var(--rule);
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  box-shadow: 0 -8px 24px rgba(20, 24, 26, .06);
+}
+.dock-inner { max-width: 700px; margin: 0 auto; }
+.keys { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.key {
+  appearance: none; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1px; min-height: 56px; padding: 8px 6px;
+  border: 1px solid var(--ink); border-radius: var(--r);
+  background: var(--ink); color: #fff; font: inherit; font-size: 1.12rem; font-weight: 600;
+  cursor: pointer; transition: background .12s, border-color .12s;
+}
+.key small { font-size: 11.5px; font-weight: 400; color: rgba(255, 255, 255, .72); }
+.key:hover { background: #242b2e; border-color: #242b2e; }
+.key:active { transform: translateY(1px); }
+.key.active { background: var(--signal); border-color: var(--signal); }
+.key.was { outline: 2px solid var(--signal); outline-offset: 1px; }
+.key:disabled { opacity: .6; cursor: default; }
+
+.aux { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.chip {
+  appearance: none; font: inherit; font-size: 13.5px; color: var(--ink-2);
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--r);
+  padding: 8px 13px; min-height: 38px; cursor: pointer;
+  display: inline-flex; flex-direction: column; align-items: flex-start; justify-content: center;
+}
+.chip small { font-size: 11.5px; color: var(--ink-2); }
+.chip:hover { color: var(--ink); border-color: var(--ink-2); }
+.chip.active { color: var(--signal); border-color: var(--signal); background: var(--signal-soft); }
+.chip.was { border-color: var(--signal); }
+.chip:disabled { opacity: .5; cursor: default; }
+
+#other-box { margin-top: 8px; }
+#other-box label { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: 4px; }
+select {
+  width: 100%; padding: 10px 12px; font: inherit; font-size: 14px; color: var(--ink);
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--r);
+}
+.primary {
+  width: 100%; margin-top: 10px; min-height: 52px; padding: 12px;
+  border: 0; border-radius: var(--r); background: var(--signal);
+  color: #fff; font: inherit; font-size: 1rem; font-weight: 600; cursor: pointer;
+}
+.primary:hover { background: #0b4c48; }
+.primary:disabled { background: var(--rule-soft); color: var(--ink-2); cursor: default; }
+#status { margin: 6px 0 0; font-size: 13px; }
+#status:empty { margin: 0; }
+#status.ok { color: var(--signal); }
+#status.err { color: var(--err); }
+.note { margin: 8px 0 0; font-size: 12px; color: var(--ink-2); }
+.note .kbd { display: none; }
+
+.lede { margin: 0; max-width: 60ch; font-size: 14px; color: var(--ink-2); }
+.stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 1px;
+  margin: 14px 0 0; background: var(--rule-soft);
+  border: 1px solid var(--rule-soft); border-radius: var(--r); overflow: hidden;
+}
+.stat { background: var(--sheet); padding: 9px 10px; }
+.stat dt { font-size: 12px; color: var(--ink-2); }
+.stat dd { margin: 2px 0 0; font-size: 20px; font-weight: 650; letter-spacing: -.01em; }
+.stat.other dd { color: var(--signal); }
+.stat.skip dd, .stat.none dd { color: var(--flag); }
+.ledger { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 12px; }
+.ledger th {
+  text-align: left; font-size: 12px; font-weight: 600; color: var(--ink-2);
+  padding: 0 8px 6px; border-bottom: 1px solid var(--rule);
+}
+.ledger td { padding: 9px 8px; border-bottom: 1px solid var(--rule-soft); vertical-align: middle; }
+.ledger td:first-child { width: 2.4em; color: var(--ink-2); }
+.ledger .mid { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
+.ledger .act { text-align: right; white-space: nowrap; }
+.ledger a { color: var(--signal); text-decoration: none; border-bottom: 1px solid transparent; }
+.ledger a:hover { border-bottom-color: var(--signal); }
+.mark { display: inline-block; padding: 2px 8px; border-radius: 2px; font-size: 12.5px; font-weight: 600; }
+.mark.yes, .mark.no { background: var(--ink); color: #fff; }
+.mark.other { background: var(--signal-soft); color: var(--signal); }
+.mark.skip { background: var(--flag-soft); color: var(--flag); }
+.mark.none { color: var(--flag); border: 1px dashed var(--flag); }
+
+@media (min-width: 720px) {
+  html, body { height: 100%; }
+  body { display: flex; flex-direction: column; }
+  main {
+    flex: 1 1 auto; min-height: 0;
+    display: flex; flex-direction: column;
+    padding: 16px 20px 0;
+  }
+  .head { flex: none; }
+  .sheet {
+    flex: 1 1 auto; min-height: 0;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .proposition { flex: 0 1 auto; min-height: 0; overflow: auto; }
+  figure { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  figure a { flex: 1 1 auto; min-height: 0; }
+  figure img { height: 100%; max-height: none; }
+  figcaption, .nav-row { flex: none; }
+  form { flex: none; }
+  .dock {
+    position: static; background: transparent; border-top: 0;
+    box-shadow: none; padding: 14px 0 16px;
+  }
+  .key { min-height: 58px; }
+  .nav-row .count { display: inline; }
+  .note .kbd { display: inline; }
+}
+
+@media (max-width: 719px) {
+  .nav-row:not(:has(a)):not(:has(.rec)) { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+  .key:active { transform: none; }
+}
 """
 
 SHELL = """<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#e1e4de">
 <title>__TITLE__</title>
 <style>
 __CSS__
@@ -356,9 +544,7 @@ __CSS__
 </head>
 <body>
 <main>
-  <div class="card">
 __BODY__
-  </div>
 </main>
 <script>
 __SCRIPT__
@@ -394,6 +580,7 @@ SINGLE_SCRIPT = r"""
       b.classList.toggle('active', b.dataset.value === value);
     });
     if (otherBox) { otherBox.hidden = value !== 'other'; }
+    document.body.classList.toggle('picking', value === 'other');
     setStatus('');
     refreshSubmit();
     if (value === 'other' && otherSelect) { otherSelect.focus(); }
@@ -466,6 +653,17 @@ SINGLE_SCRIPT = r"""
     e.preventDefault();
     if (current) { send(current); }
   });
+
+  var dock = document.querySelector('.dock');
+  function syncDock() {
+    if (!dock) { return; }
+    document.documentElement.style.setProperty(
+      '--dock-h', Math.ceil(dock.getBoundingClientRect().height) + 'px'
+    );
+  }
+  if (window.ResizeObserver) { new ResizeObserver(syncDock).observe(dock); }
+  else { window.addEventListener('resize', syncDock); }
+  syncDock();
 })();
 """
 
@@ -495,6 +693,7 @@ BATCH_ITEM_SCRIPT = r"""
   function revealOther() {
     if (!otherBox) { return; }
     otherBox.hidden = false;
+    document.body.classList.add('picking');
     submit.hidden = false;
     buttons.forEach(function (b) {
       b.classList.toggle('active', b.dataset.value === 'other');
@@ -568,6 +767,17 @@ BATCH_ITEM_SCRIPT = r"""
       send('other');
     }
   });
+
+  var dock = document.querySelector('.dock');
+  function syncDock() {
+    if (!dock) { return; }
+    document.documentElement.style.setProperty(
+      '--dock-h', Math.ceil(dock.getBoundingClientRect().height) + 'px'
+    );
+  }
+  if (window.ResizeObserver) { new ResizeObserver(syncDock).observe(dock); }
+  else { window.addEventListener('resize', syncDock); }
+  syncDock();
 })();
 """
 
@@ -613,11 +823,6 @@ def render_shell(title: str, body: str, script: str) -> str:
     return page
 
 
-def badge(text: str, kind: str = "") -> str:
-    cls = f"badge {kind}".strip()
-    return f'<span class="{cls}">{esc(text)}</span>'
-
-
 def choice_button(label: str, value: str, hint: str = "", extra: str = "") -> str:
     small = f"<small>{esc(hint)}</small>" if hint else ""
     cls = f"choice {extra}".strip()
@@ -627,10 +832,19 @@ def choice_button(label: str, value: str, hint: str = "", extra: str = "") -> st
     )
 
 
-def other_controls(options: list[str]) -> tuple[str, str]:
+def tally_rail(answers: list[dict | None], current: int) -> str:
+    cells = []
+    for index, answer in enumerate(answers):
+        kind = answer["choice_type"] if answer else "todo"
+        cls = f"tally {kind}" + (" here" if index == current else "")
+        cells.append(f'<i class="{cls}"></i>')
+    return '<div class="rail" aria-hidden="true">' + "".join(cells) + "</div>"
+
+
+def other_controls(options: list[str], button_kind: str = "chip") -> tuple[str, str]:
     if not options:
         return "", ""
-    button = choice_button("其他", "other", "从其他选项中选")
+    button = choice_button("其他", "other", "从其他选项中选", button_kind)
     rendered = "".join(
         f'<option value="{esc(option)}">{esc(option)}</option>' for option in options
     )
@@ -662,36 +876,47 @@ def figures_html(images: list[dict], prefix: str) -> str:
 def build_single_page(state: dict) -> str:
     labels = state["labels"]
     other_button, other_box = other_controls(state["other_options"])
-    buttons = [
-        choice_button(labels["yes"], "yes", labels["yes_hint"]),
-        choice_button(labels["no"], "no", labels["no_hint"]),
+    keys = [
+        choice_button(labels["yes"], "yes", labels["yes_hint"], "key"),
+        choice_button(labels["no"], "no", labels["no_hint"], "key"),
     ]
+    aux = []
     if other_button:
-        buttons.append(other_button)
-    buttons.append(choice_button("跳过", "skip", "本次不判断", "skip"))
+        aux.append(other_button)
+    aux.append(choice_button("跳过", "skip", "本次不判断", "chip skip"))
 
-    meta = []
+    head = ['<span class="head-spacer"></span>']
     if state.get("id"):
-        meta.append(badge(state["id"]))
+        head.insert(0, f'<span class="ident">{esc(state["id"])}</span>')
     if state.get("progress"):
-        meta.append(badge(state["progress"], "progress"))
-    meta.append("<span>单选一次</span>")
+        head.insert(1, f'<span class="pos">{esc(state["progress"])}</span>')
+    head.append('<span class="count">选定后提交</span>')
 
-    hint = f"提交后服务自动关闭。快捷键：Y {labels['yes']} · N {labels['no']} · S 跳过"
+    keys_hint = f"快捷键：Y {labels['yes']}、N {labels['no']}、S 跳过"
     if state["other_options"]:
-        hint += " · O 其他"
+        keys_hint += "、O 其他"
+    hint = '提交后服务自动关闭。<span class="kbd">' + esc(keys_hint) + "</span>"
 
     body = f"""
-    <div class="meta">{''.join(meta)}</div>
-    <section class="proposition">{state['proposition_html']}</section>
-    {figures_html(state['images'], 'image/')}
+    <header class="head">
+      <div class="head-row">{''.join(head)}</div>
+    </header>
+    <article class="sheet">
+      <section class="proposition">{state['proposition_html']}</section>
+      {figures_html(state['images'], 'image/')}
+    </article>
     <form id="vote" novalidate>
-      <div class="choices">{''.join(buttons)}</div>
-      {other_box}
-      <button type="submit" id="submit" class="primary" disabled>提交</button>
-      <p id="status" role="status"></p>
+      <div class="dock">
+        <div class="dock-inner">
+          <div class="keys">{''.join(keys)}</div>
+          <div class="aux">{''.join(aux)}</div>
+          {other_box}
+          <button type="submit" id="submit" class="primary" disabled>提交</button>
+          <p id="status" role="status"></p>
+          <p class="note">{hint}</p>
+        </div>
+      </div>
     </form>
-    <p class="hint">{esc(hint)}</p>
 """
     title = f"投票 · {state['id']}" if state.get("id") else "投票"
     return render_shell(title, body, SINGLE_SCRIPT)
@@ -704,51 +929,64 @@ def build_batch_item_page(state: dict, index: int) -> str:
     answer = state["answers"][index]
     labels = state["labels"]
     done = sum(1 for value in state["answers"] if value is not None)
-    percent = 100 if total == 0 else int(round(done * 100 / total))
+    was = answer["choice_type"] if answer else ""
 
-    other_button, other_box = other_controls(item["other_options"])
-    buttons = [
-        choice_button(labels["yes"], "yes", labels["yes_hint"]),
-        choice_button(labels["no"], "no", labels["no_hint"]),
+    def kind(base: str, value: str) -> str:
+        return f"{base} was" if was == value else base
+
+    other_button, other_box = other_controls(
+        item["other_options"], kind("chip", "other")
+    )
+    keys = [
+        choice_button(labels["yes"], "yes", labels["yes_hint"], kind("key", "yes")),
+        choice_button(labels["no"], "no", labels["no_hint"], kind("key", "no")),
     ]
-    if other_button:
-        buttons.append(other_button)
-    buttons.append(choice_button("跳过", "skip", "本次不判断", "skip"))
+    aux = [other_button] if other_button else []
 
-    meta = [badge(f"第 {index + 1} / {total} 题", "progress")]
+    head = []
     if item.get("id"):
-        meta.append(badge(item["id"]))
-    meta.append(f"<span>已完成 {done} / {total}</span>")
-    if answer:
-        meta.append(f'<span class="badge current">当前：{esc(answer["choice_label"])}</span>')
+        head.append(f'<span class="ident">{esc(item["id"])}</span>')
+    head.append(f'<span class="pos">第 {index + 1} / {total} 题</span>')
+    head.append('<span class="head-spacer"></span>')
+    head.append(f'<span class="count">已答 {done} / {total}</span>')
+    head.append(
+        '<button type="button" class="choice skip-link" data-value="skip">跳过</button>'
+    )
 
     left = f'<a href="?item={index - 1}">← 上一题</a>' if index > 0 else "<span></span>"
+    rec = f'<span class="rec">当前：{esc(answer["choice_label"])}</span>' if answer else ""
     if done == total:
         right = '<a href="./">查看总览</a>'
     else:
-        right = f'<span class="muted">答完自动进入下一题</span>'
+        right = '<span class="count">答完自动进入下一题</span>'
 
-    hint = (
-        "点击是/否直接记录并进入下一题，跳过也直接记录。"
-        "快捷键 Y/N/S"
-    )
+    keys_hint = "快捷键：Y 是、N 否、S 跳过"
     if item["other_options"]:
-        hint += "；O 其他"
-    hint += "；上一题可修改。"
+        keys_hint += "、O 其他"
+    hint = '点一下直接记录并进入下一题。<span class="kbd">' + keys_hint + "</span>"
 
     body = f"""
-    <div class="meta">{''.join(meta)}</div>
-    <div class="bar" aria-hidden="true"><span style="width:{percent}%"></span></div>
-    <section class="proposition">{item['proposition_html']}</section>
-    {figures_html(item['images'], f'image/{index}/')}
-    <div class="nav-row">{left}{right}</div>
+    <header class="head">
+      <div class="head-row">{''.join(head)}</div>
+      {tally_rail(state["answers"], index)}
+    </header>
+    <article class="sheet">
+      <section class="proposition">{item['proposition_html']}</section>
+      {figures_html(item['images'], f'image/{index}/')}
+      <div class="nav-row">{left}{rec}{right}</div>
+    </article>
     <form id="vote" novalidate>
-      <div class="choices">{''.join(buttons)}</div>
-      {other_box}
-      <button type="submit" id="submit" class="primary" hidden>确认其他</button>
-      <p id="status" role="status"></p>
+      <div class="dock">
+        <div class="dock-inner">
+          <div class="keys">{''.join(keys)}</div>
+          <div class="aux">{''.join(aux)}</div>
+          {other_box}
+          <button type="submit" id="submit" class="primary" hidden>确认其他</button>
+          <p id="status" role="status"></p>
+          <p class="note">{hint}</p>
+        </div>
+      </div>
     </form>
-    <p class="hint">{esc(hint)}</p>
 """
     title = f"{state['title']} · 第 {index + 1}/{total} 题"
     script = BATCH_ITEM_SCRIPT.replace("__INDEX__", str(index))
@@ -757,37 +995,65 @@ def build_batch_item_page(state: dict, index: int) -> str:
 
 def build_batch_summary_page(state: dict) -> str:
     total = len(state["items"])
-    done = sum(1 for value in state["answers"] if value is not None)
+    answers = state["answers"]
+    done = sum(1 for value in answers if value is not None)
+    stats = summarize(answers)["counts"]
+    labels = state["labels"]
+
     rows = []
     for index, item in enumerate(state["items"]):
-        answer = state["answers"][index]
+        answer = answers[index]
         label = answer["choice_label"] if answer else "未答"
+        kind = answer["choice_type"] if answer else "none"
         rows.append(
             "<tr>"
             f"<td>{index + 1}</td>"
-            f"<td>{esc(item['id'])}</td>"
-            f"<td>{esc(label)}</td>"
-            f'<td><a href="?item={index}" aria-label="修改 {esc(item["id"])}">修改</a></td>'
+            f'<td class="mid">{esc(item["id"])}</td>'
+            f'<td><span class="mark {kind}">{esc(label)}</span></td>'
+            f'<td class="act"><a href="?item={index}" aria-label="修改 {esc(item["id"])}">修改</a></td>'
             "</tr>"
         )
 
-    meta = [
-        badge(f"已完成 {done} / {total}", "progress"),
-        badge(state["title"]),
+    cells = [
+        ("yes", labels["yes"], stats["yes"]),
+        ("no", labels["no"], stats["no"]),
+        ("other", "其他", stats["other"]),
+        ("skip", "跳过", stats["skip"]),
     ]
+    stat_html = "".join(
+        f'<div class="stat {kind}"><dt>{esc(name)}</dt><dd>{count}</dd></div>'
+        for kind, name, count in cells
+        if count
+    )
+    if done < total:
+        stat_html += f'<div class="stat none"><dt>未答</dt><dd>{total - done}</dd></div>'
+
     body = f"""
-    <div class="meta">{''.join(meta)}</div>
-    <div class="bar" aria-hidden="true"><span style="width:100%"></span></div>
-    <p class="summary-lead">共 {total} 项，全部已记录。核对后提交；点「修改」可回到原题重新作答。</p>
-    <div class="table-wrap">
-      <table class="ledger">
-        <thead><tr><th>#</th><th>ID</th><th>选择</th><th></th></tr></thead>
-        <tbody>{''.join(rows)}</tbody>
-      </table>
+    <header class="head">
+      <div class="head-row">
+        <span class="pos">{esc(state['title'])}</span>
+        <span class="head-spacer"></span>
+        <span class="count">已完成 {done} / {total}</span>
+      </div>
+      {tally_rail(answers, -1)}
+    </header>
+    <article class="sheet">
+      <p class="lede">逐条核对，点「修改」回到原题重答。确认后提交，结果写入 JSON 文件。</p>
+      <dl class="stats">{stat_html}</dl>
+      <div class="table-wrap">
+        <table class="ledger">
+          <thead><tr><th>#</th><th>ID</th><th>选择</th><th></th></tr></thead>
+          <tbody>{''.join(rows)}</tbody>
+        </table>
+      </div>
+    </article>
+    <div class="dock">
+      <div class="dock-inner">
+        <button type="button" id="submit-all" class="primary">提交结果</button>
+        <p id="status" role="status"></p>
+        <p class="note">提交后服务自动关闭。</p>
+      </div>
     </div>
-    <button type="button" id="submit-all" class="primary">提交结果</button>
-    <p id="status" role="status"></p>
-    <p class="hint">提交后服务自动关闭，结果写入 JSON 文件。</p>
 """
     return render_shell(f"{state['title']} · 总览", body, SUMMARY_SCRIPT)
 
